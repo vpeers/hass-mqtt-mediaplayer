@@ -4,6 +4,7 @@ import homeassistant.loader as loader
 import hashlib
 import voluptuous as vol
 import base64
+import aiohttp
 from homeassistant.exceptions import TemplateError, NoEntitySpecifiedError
 from homeassistant.helpers.script import Script
 from homeassistant.helpers.event import TrackTemplate, async_track_template_result, async_track_state_change
@@ -60,7 +61,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
                 vol.Optional(CURRENT_SOURCE_T): cv.template,
                 vol.Optional(SOURCE_LIST_T, default=[]): vol.All(
                     cv.ensure_list, [{vol.Required("id"): cv.string,
-                                      vol.Required("name"): cv.string}]),
+                                      vol.Required("name"): cv.string,
+                                      vol.Optional("icon_url"): cv.string}]),
                 vol.Optional(VOLUME_ACTION): cv.SCRIPT_SCHEMA
             }),
         vol.Optional(NEXT_ACTION): cv.SCRIPT_SCHEMA,
@@ -205,6 +207,11 @@ class MQTTMediaPlayer(MediaPlayerEntity):
 
                 if key == "source_list":
                     self._source_list = value
+                    self._source_icons_url = {}
+                    for entry in self._source_list:
+                        if "icon_url" in entry:
+                            self._source_icons_url[entry['name']] = entry['icon_url']
+
 
 
     @property
@@ -238,6 +245,15 @@ class MQTTMediaPlayer(MediaPlayerEntity):
         for entry in self._source_list:
             if int(entry['id']) == int(result):
                 self._source = entry['name']
+        if self._source in self._source_icons_url:
+            url = self._source_icons_url[self._source]
+            async with aiohttp.ClientSession() as session:
+                try:
+                    async with session.get(url) as resp:
+                        if resp.status == 200:
+                            self._album_art = await resp.read()  # store as bytes
+                except Exception as e:
+                    _LOGGER.error("Failed to fetch source icon: %s", e)
         if MQTTMediaPlayer:
             self.schedule_update_ha_state(True)
 
